@@ -23,6 +23,11 @@ what differs between Linux, macOS and Windows.
   the same fingerprint, because the certificate authority is in the backup.
   A single vault's file can be taken out with `--mailbox ID --out FILE`.
 
+- **Security:** the post-quantum signature library (`ml-dsa`) that
+  `vault-core` pulls in had a timing weakness (RUSTSEC-2025-0144). The server
+  now uses the same fixed copy as the vault apps. Other libraries are at
+  their newest compatible versions.
+
 ### What you need to do
 
 Nothing for an existing server. To turn backups on, follow section 9 of the
