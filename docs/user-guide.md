@@ -460,23 +460,72 @@ script (it then shows in the environment, so avoid that on a shared computer).
 ## Moving from the old Docker server in the vault repo
 
 The old server (`server/sync` in the vault repo) and this one speak the same
-protocol, but they keep their data differently. Until the import tool
-arrives, move by setting up again; your vault stays on every device the whole
-time, so nothing is lost.
+protocol. **`vault-server import` takes over the old server's data**: the
+vaults' files, the devices with their keys, the certificate authority (so the
+**fingerprint stays the same**) and the admin key. Your devices keep working
+without joining again.
 
-1. Start vault-server (section 4) on a **different port** than the old one,
-   for example 9443, or stop the old one first with `docker compose down`
-   in the vault repo's `server/sync` folder.
-2. On every device **except** your first computer: **Sync → Turn off on this
-   computer**, or `vault cloud off`.
-3. On your first computer: **Sync → Turn off everywhere…**, or
-   `vault cloud off --everywhere`. This deletes the vault's copy from the old
-   server only.
-4. On your first computer, set up with the new server (section 6).
-5. On each other device, join with a new link (section 7). Each one merges
-   its own copy, so edits made in between are kept.
-6. When everything syncs, remove the old container and volume:
-   `docker compose down -v` in the old `server/sync` folder.
+You need two things from the old server: its data folder, and the **mailbox
+id** of each vault, which a device knows (the old server's files are named by a
+hash, not by the id).
+
+1. **Find the mailbox id.** On a device that uses the old server, run
+   `vault cloud status`. The `mailbox:` line is a 32-character id. (Shown by
+   Secret Vault versions after 0.2.0; on an older one, update the app first.)
+2. **Stop the old server**, so its files are complete:
+
+   ```sh
+   cd server/sync            # in the vault repo
+   docker compose down       # NOT with -v: that deletes the data
+   ```
+
+3. **Get at its data folder.** The volume is called `vault-sync-data` (with the
+   compose project name in front). Find it, and copy it so the old data stays
+   as it is:
+
+   ```sh
+   docker volume ls | grep vault-sync-data
+   sudo cp -a "$(docker volume inspect -f '{{ .Mountpoint }}' <the volume name>)" ./old-sync-data
+   ```
+
+4. **Install vault-server** (section 4) but do not start it yet, and look at
+   what the old folder holds:
+
+   ```sh
+   sudo -u vault-server VAULT_SERVER_DATA=/var/lib/vault-server vault-server import ./old-sync-data --list
+   ```
+
+   Each vault is listed with its file name and its devices, so you can tell
+   them apart:
+
+   ```
+   9f8e7d6c5b4a  version 7, 5021 bytes, 2 device(s): Laptop (last seen …), iPhone (last seen …)
+   ```
+
+5. **Import.** With one vault, give its mailbox id; with several, say which
+   file is which with `NAME=ID` (the start of the name is enough):
+
+   ```sh
+   sudo -u vault-server VAULT_SERVER_DATA=/var/lib/vault-server vault-server import ./old-sync-data --mailbox 0123456789abcdef0123456789abcdef
+   sudo -u vault-server VAULT_SERVER_DATA=/var/lib/vault-server vault-server import ./old-sync-data --mailbox 9f8e=0123…  --mailbox a1b2=89ab…
+   ```
+
+   It refuses a server that already keeps vaults. Vaults you give no id for
+   are not imported, and it says so.
+
+6. **Start vault-server on the old address and port** (the same `--hosts`, and
+   publish port 8443 as before). Devices connect as before: same address,
+   same fingerprint, same keys. If the address has to change, run
+   `vault cloud setup --server NEW-ADDRESS --fingerprint SAME-FINGERPRINT` on
+   one device and the others follow.
+7. When everything syncs, remove the old container and volume
+   (`docker compose down -v` in the old `server/sync` folder) and your copy
+   `./old-sync-data` (it holds the old admin key and certificate key).
+
+**If you cannot get the data or the id,** start fresh instead; your vault
+stays on every device the whole time, so nothing is lost: turn sync off on
+every device (`vault cloud off`), set up with the new server (section 6), and
+join each device with a new link (section 7). Each one merges its own copy.
 
 ## 10. Away from home
 

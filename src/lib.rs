@@ -8,6 +8,7 @@
 pub mod api;
 pub mod backup;
 pub mod files;
+pub mod import;
 pub mod server;
 pub mod store;
 pub mod tls;

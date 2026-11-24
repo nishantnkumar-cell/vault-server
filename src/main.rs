@@ -9,6 +9,7 @@ use clap::{Args, Parser, Subcommand};
 
 use vault_server::api::when;
 use vault_server::backup;
+use vault_server::import;
 use vault_server::server::{self, Config};
 use vault_server::store::Store;
 use vault_server::{tls, util};
@@ -78,6 +79,22 @@ enum Cmd {
         mailbox: String,
         /// The version number, from `vault-server history`.
         version: i64,
+    },
+    /// Take over the data of the old Docker sync server (the workerd one in
+    /// the vault repo): devices keep working with the same keys and
+    /// fingerprint. Stop the old server first.
+    Import {
+        /// The old server's data folder (the Docker volume's contents, with
+        /// `mailboxes/`, `tls/` and `admin-key`).
+        folder: PathBuf,
+        /// Only list the vaults found, with their devices.
+        #[arg(long)]
+        list: bool,
+        /// Which vault each file is, as its 32-character mailbox id from a
+        /// device (`vault cloud status`): `ID` when there is one file, else
+        /// `NAME=ID` with the name from `--list` (a unique start is enough).
+        #[arg(long = "mailbox")]
+        mailbox: Vec<String>,
     },
     /// Sealed backups of everything this server keeps.
     Backup {
@@ -221,6 +238,11 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Cmd::Backup { cmd } => backup_cmd(&cli.common, cmd)?,
+        Cmd::Import {
+            folder,
+            list,
+            mailbox,
+        } => import_cmd(&cli.common, &folder, list, &mailbox)?,
         Cmd::History { mailbox } => {
             mailbox_arg(&mailbox)?;
             let store = open_store(&cli.common)?;
@@ -247,6 +269,59 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+fn import_cmd(c: &Common, folder: &std::path::Path, list: bool, given: &[String]) -> Result<()> {
+    let old = import::scan(folder)?;
+    if old.is_empty() {
+        bail!("no mailboxes found under {}/mailboxes", folder.display());
+    }
+    if list || given.is_empty() {
+        println!("Vaults found in {}:", folder.display());
+        for m in &old {
+            println!("  {}", import::describe(m));
+        }
+        if !list {
+            println!(
+                "\nTo import, say which vault each is, using the mailbox id from one of its devices\n(`vault cloud status`). With one vault: --mailbox ID. With several:\n--mailbox NAME=ID for each, where NAME is the start of the name above."
+            );
+        }
+        return Ok(());
+    }
+    let given: Vec<import::Assignment> = given
+        .iter()
+        .map(|g| match g.split_once('=') {
+            Some((n, id)) => (Some(n.to_string()), id.to_string()),
+            None => (None, g.to_string()),
+        })
+        .collect();
+    let picked = import::assign(&old, &given)?;
+    let report = import::import(&c.data, folder, &old, &picked)?;
+    println!(
+        "Imported {} vault(s) with {} device(s).",
+        report.mailboxes, report.devices
+    );
+    if report.kept_authority {
+        println!("The old certificate authority was kept, so the fingerprint is unchanged.");
+    } else {
+        println!(
+            "The old server had no certificate authority in {}/tls: this server makes its own, and devices must set up again with its new fingerprint.",
+            folder.display()
+        );
+    }
+    if report.kept_admin_key {
+        println!("The old admin key was kept.");
+    }
+    if !report.left_out.is_empty() {
+        println!(
+            "Not imported (no --mailbox given): {}",
+            report.left_out.join(", ")
+        );
+    }
+    println!(
+        "\nNext: stop the old server, start this one on the same address and port\n(`vault-server serve`, with the same --hosts), and the devices keep working:\nnothing to set up again. If the address changes, run `vault cloud setup --server`\nagain on one device with the new address and the same fingerprint."
+    );
     Ok(())
 }
 
