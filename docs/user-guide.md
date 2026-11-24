@@ -96,12 +96,60 @@ name and the address; the server's certificate covers all of them.
 
 ## 4. Install and start the server
 
-Pick **one** of the three ways.
+Pick **one** of the ways below. On Linux, a package is the easiest.
 
-### 4A. Linux, as a system service (recommended on Linux)
+### 4A. Linux, from a package (easiest)
 
-The server runs as its own user, `vault-server`, starts with the computer,
-and keeps everything in `/var/lib/vault-server`.
+A package installs the program, the `vault-server` service and its user in
+one step, and keeps your data when you remove or upgrade it. Download the
+file for your system from the
+[releases page](https://github.com/nishantnkumar-cell/vault-server/releases)
+(check it against `SHA256SUMS.txt`).
+
+| System | Install |
+|---|---|
+| Debian 13, Ubuntu 24.04 or newer | `sudo apt install ./vault-server_0.3.0_amd64.deb` |
+| Arch Linux | `sudo pacman -U vault-server-0.3.0-x86_64.pkg.tar.zst` |
+| Any other Linux with systemd (x86-64) | `sudo tar -xzf vault-server-0.3.0-linux-x86_64.tar.gz -C /` then `sudo systemd-sysusers && sudo systemctl daemon-reload` |
+
+(Use the version number of the file you downloaded.) The server is **not
+started yet**: it needs the address from step 3 first.
+
+1. Tell it the address (replace the example with yours; a name and the
+   address, separated by a comma, also works):
+
+   ```sh
+   sudo nano /etc/vault-server/env        # remove the # before VAULT_SERVER_HOSTS and edit it
+   ```
+
+   The file is readable by root only, because it can also hold the admin key.
+
+2. Start it, now and at every boot:
+
+   ```sh
+   sudo systemctl enable --now vault-server
+   ```
+
+3. Print what you need for step 6:
+
+   ```sh
+   sudo -u vault-server VAULT_SERVER_DATA=/var/lib/vault-server vault-server show
+   ```
+
+   The output is the one shown in 4A2 below.
+
+Upgrading is installing the newer package: the server restarts by itself and
+keeps its data, certificate and fingerprint. Removing the package
+(`sudo apt remove vault-server`, `sudo pacman -R vault-server`) stops the
+service but **keeps `/var/lib/vault-server`** (your vaults' files, keys and
+backup settings) and the `vault-server` user. Delete them by hand only if you
+want everything gone.
+
+### 4A2. Linux, built from source
+
+Use this on a system without a package, or to build it yourself. The server
+runs as its own user, `vault-server`, starts with the computer, and keeps
+everything in `/var/lib/vault-server`.
 
 1. Install Rust (once) and build the server:
 
@@ -112,8 +160,6 @@ and keeps everything in `/var/lib/vault-server`.
    cd vault-server
    cargo build --release
    ```
-
-   (Packages for Debian, Ubuntu and Arch that skip this step are coming.)
 
 2. Install it as a service:
 

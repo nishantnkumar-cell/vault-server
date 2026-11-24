@@ -1,0 +1,31 @@
+#!/bin/sh
+# Make the service's user; the service itself is left for you to configure and
+# start (it needs the names devices use to reach this computer).
+set -e
+if [ "$1" = configure ]; then
+    if ! getent passwd vault-server >/dev/null; then
+        if command -v systemd-sysusers >/dev/null 2>&1; then
+            systemd-sysusers /usr/lib/sysusers.d/vault-server.conf
+        else
+            adduser --system --group --home /var/lib/vault-server --no-create-home \
+                --shell /usr/sbin/nologin --gecos "Secret Vault server" vault-server
+        fi
+    fi
+    if [ -z "$2" ]; then
+        cat <<'MSG'
+
+vault-server is installed but not started. Next:
+  1. sudo nano /etc/vault-server/env        (set VAULT_SERVER_HOSTS)
+  2. sudo systemctl enable --now vault-server
+  3. sudo -u vault-server VAULT_SERVER_DATA=/var/lib/vault-server vault-server show
+Guide: /usr/share/doc/vault-server/user-guide.md.gz
+
+MSG
+    fi
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    # An upgrade restarts a running server so it uses the new program.
+    if [ -n "$2" ] && systemctl is-active --quiet vault-server 2>/dev/null; then
+        systemctl restart vault-server || true
+    fi
+fi
+exit 0

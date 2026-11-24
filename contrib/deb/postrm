@@ -1,0 +1,11 @@
+#!/bin/sh
+# Never touches /var/lib/vault-server: it holds your vaults' files, the keys
+# and the backup settings. Remove it by hand if you really want it gone.
+set -e
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+if [ "$1" = purge ]; then
+    echo "vault-server: /var/lib/vault-server (your data) and the vault-server user were kept." >&2
+fi
+exit 0
