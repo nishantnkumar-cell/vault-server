@@ -1,0 +1,40 @@
+[package]
+name = "vault-server"
+version = "0.1.0"
+edition = "2024"
+description = "Sync and backup server for Secret Vault: speaks the vault sync API 1, post-quantum TLS, own certificate authority."
+license = "PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/nishantnkumar-cell/vault-server"
+publish = false
+
+[dependencies]
+anyhow = "1.0.105"
+axum = { version = "0.8.9", features = ["ws"] }
+clap = { version = "4.6.9", features = ["derive", "env"] }
+data-encoding = "2.11.1"
+futures-util = "0.3.34"
+getrandom = "0.4.3"
+hyper = "1.12.0"
+hyper-util = { version = "0.1.21", features = ["tokio", "server-auto", "service", "http1", "http2"] }
+rcgen = { version = "0.14.10", features = ["aws_lc_rs", "pem", "x509-parser"] }
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12", "prefer-post-quantum"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+subtle = "2.6.1"
+time = "0.3.55"
+tokio = { version = "1.54.1", features = ["full"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
+tower = "0.5.3"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+futures-util = "0.3.34"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "aws_lc_rs", "std", "tls12"] }
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+tokio-rustls = "0.26.6"
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }

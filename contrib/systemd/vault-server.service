@@ -1,0 +1,59 @@
+# Secret Vault server as a system service (docs/user-guide.md, "Install on Linux").
+#
+#   sudo install -m 755 vault-server /usr/local/bin/
+#   sudo useradd --system --home-dir /var/lib/vault-server --shell /usr/sbin/nologin vault-server
+#   sudo install -m 644 vault-server.service /etc/systemd/system/
+#   sudo systemctl edit vault-server      # set VAULT_SERVER_HOSTS, see below
+#   sudo systemctl enable --now vault-server
+#   sudo -u vault-server VAULT_SERVER_DATA=/var/lib/vault-server vault-server show
+[Unit]
+Description=Secret Vault sync server
+Documentation=https://github.com/nishantnkumar-cell/vault-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=vault-server
+Group=vault-server
+# The names and addresses your other devices use to reach this computer,
+# comma-separated. Change it with `systemctl edit vault-server`:
+#   [Service]
+#   Environment=VAULT_SERVER_HOSTS=vault.home.example,192.168.1.20
+Environment=VAULT_SERVER_DATA=/var/lib/vault-server
+Environment=VAULT_SERVER_LISTEN=0.0.0.0:8443
+EnvironmentFile=-/etc/vault-server/env
+ExecStart=/usr/local/bin/vault-server serve
+Restart=on-failure
+RestartSec=5s
+
+StateDirectory=vault-server
+StateDirectoryMode=0700
+UMask=0077
+
+# The server needs only its data folder and the network.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+[Install]
+WantedBy=multi-user.target

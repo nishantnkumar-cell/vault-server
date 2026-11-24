@@ -1,0 +1,388 @@
+# vault-server user guide
+
+This guide takes you from nothing to a working sync server on a computer in
+your home, with your first computer and your phone connected. No Docker or
+Rust knowledge is needed if you follow it step by step. The examples use the
+placeholder names "Alex Example" and `vault.home.example`; use your own.
+
+**Contents**
+
+1. [What it is and when to use it](#1-what-it-is-and-when-to-use-it)
+2. [What you need](#2-what-you-need)
+3. [Give the server computer a fixed address](#3-give-the-server-computer-a-fixed-address)
+4. [Install and start the server](#4-install-and-start-the-server) (Linux, Docker, macOS)
+5. [Let your other devices in (firewall)](#5-let-your-other-devices-in-firewall)
+6. [Connect your first computer](#6-connect-your-first-computer)
+7. [Add more devices, including your phone](#7-add-more-devices-including-your-phone)
+8. [Day to day: status, history, undoing a bad save](#8-day-to-day-status-history-undoing-a-bad-save)
+9. [Moving from the old Docker server in the vault repo](#moving-from-the-old-docker-server-in-the-vault-repo)
+10. [Away from home](#10-away-from-home)
+11. [Updating the server](#11-updating-the-server)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Differences between Linux, macOS and Windows](#13-differences-between-linux-macos-and-windows)
+
+## 1. What it is and when to use it
+
+Secret Vault keeps your vault on every device. To keep those copies the same,
+the devices need a place to meet. **vault-server** is that place, running on a
+computer you own: a desktop that is usually on, a small home server, a NAS
+that runs Docker, or a Raspberry Pi 4 or newer.
+
+```
+ Alex's laptop               the server computer (at home)          Alex's phone
+ ┌──────────────┐            ┌─────────────────────────────┐        ┌──────────────┐
+ │ Secret Vault │──https────▶│ vault-server, port 8443     │◀─https─│ Secret Vault │
+ │ (the vault)  │            │ keeps the ENCRYPTED file    │        │ (same vault) │
+ └──────────────┘            │ and each device's access    │        └──────────────┘
+                             └─────────────────────────────┘
+```
+
+Use it when:
+
+- you would rather not use a Cloudflare account (the other cloud sync option,
+  vault user guide chapter 15);
+- your devices are at home most of the time, or you can reach home through a
+  VPN (section 10);
+- you want the server's copy to stay in your house.
+
+What the server can and cannot do:
+
+- It **stores only encrypted vault files**. It never sees your master
+  password, your keys or any item, so someone who steals the server computer
+  learns nothing from it.
+- It **cannot change** your vault: every device checks each file it gets.
+- It **can** see when your devices sync, from which addresses, and how big
+  the file is, and (like any server) it could withhold or delete the copy.
+  Each device keeps its own full vault, so nothing is lost if the server
+  disappears.
+
+## 2. What you need
+
+- One computer to run the server. It can also be a computer you use the vault
+  on.
+- On that computer, **either** Linux (any recent Debian, Ubuntu, Fedora or
+  Arch), **or** Docker (Linux, macOS or Windows), **or** macOS.
+- Secret Vault with cloud sync (the `vault cloud` command and the desktop
+  app's **Sync** page) on each computer, with `vaultd` running and the vault
+  unlocked on the first one. On a phone, the iPhone or iPad app.
+- About twenty minutes the first time.
+
+## 3. Give the server computer a fixed address
+
+Your other devices find the server by its address on your home network. That
+address must not change.
+
+### 3.1 Find the address
+
+| The server computer | How |
+|---|---|
+| Linux | `ip -4 addr show scope global`; the address after `inet`, such as `192.168.1.20` |
+| macOS | **System Settings → Wi-Fi** (or **Network**), **Details…** next to your network; **IP address** |
+| Windows | `ipconfig` in PowerShell; **IPv4 Address** under your Wi-Fi or Ethernet adapter |
+
+Home addresses almost always start with `192.168.`, `10.` or `172.16.` to
+`172.31.`.
+
+### 3.2 Keep it fixed
+
+Open your router's page (often [192.168.1.1](http://192.168.1.1) or
+[192.168.0.1](http://192.168.0.1); the address and password are usually on a
+sticker on the router). Look for **DHCP reservation**, **Address
+reservation** or **Static lease**, pick the server computer and save.
+
+You can also use a name, such as `vault.home.example` if your router gives
+names, or `computername.local` on many home networks. You can give both a
+name and the address; the server's certificate covers all of them.
+
+## 4. Install and start the server
+
+Pick **one** of the three ways.
+
+### 4A. Linux, as a system service (recommended on Linux)
+
+The server runs as its own user, `vault-server`, starts with the computer,
+and keeps everything in `/var/lib/vault-server`.
+
+1. Install Rust (once) and build the server:
+
+   ```sh
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # accept the defaults
+   source "$HOME/.cargo/env"
+   git clone https://github.com/nishantnkumar-cell/vault-server.git
+   cd vault-server
+   cargo build --release
+   ```
+
+   (Packages for Debian, Ubuntu and Arch that skip this step are coming.)
+
+2. Install it as a service:
+
+   ```sh
+   sudo install -m 755 target/release/vault-server /usr/local/bin/
+   sudo useradd --system --home-dir /var/lib/vault-server --shell /usr/sbin/nologin vault-server
+   sudo install -m 644 contrib/systemd/vault-server.service /etc/systemd/system/
+   ```
+
+3. Tell it the address from step 3 (replace the example with yours; a name
+   and the address, separated by a comma, also works):
+
+   ```sh
+   sudo mkdir -p /etc/vault-server
+   echo 'VAULT_SERVER_HOSTS=192.168.1.20' | sudo tee /etc/vault-server/env
+   ```
+
+4. Start it, now and at every boot:
+
+   ```sh
+   sudo systemctl enable --now vault-server
+   ```
+
+5. Print what you need for step 6:
+
+   ```sh
+   sudo -u vault-server VAULT_SERVER_DATA=/var/lib/vault-server vault-server show
+   ```
+
+   ```
+   Secret Vault server (vault-server 0.1.0)
+     address:      https://192.168.1.20:8443
+     certificate:  localhost, 127.0.0.1, 192.168.1.20
+     fingerprint:  tbCvXr6N001Lm6NUgBwIgyL5MjAWEOiHLXJ0gQT5dRQ
+     admin key:    3q9V…
+
+   On the first computer, with the vault unlocked:
+     vault cloud setup --server https://192.168.1.20:8443 --fingerprint tbCvXr6N001Lm6NUgBwIgyL5MjAWEOiHLXJ0gQT5dRQ
+   ```
+
+   - The **fingerprint** identifies the server's own certificate. Devices
+     check it, so another computer on your network cannot pretend to be your
+     server. It stays the same as long as `/var/lib/vault-server` is kept.
+   - The **admin key** lets setup create a place for your vault on the
+     server. Treat it like a password; only setup needs it.
+
+`systemctl status vault-server` shows whether it runs, and
+`journalctl -u vault-server` shows its log.
+
+### 4B. Docker (Linux, macOS or Windows)
+
+1. Install Docker:
+
+   | The server computer | What to install |
+   |---|---|
+   | Linux (Debian, Ubuntu) | `sudo apt install docker.io docker-compose-v2`, then `sudo usermod -aG docker $USER`, sign out and back in |
+   | Linux (Arch) | `sudo pacman -S docker docker-compose`, `sudo systemctl enable --now docker`, then `sudo usermod -aG docker $USER`, sign out and back in |
+   | Windows 10/11 | [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/), with **Use WSL 2** ticked |
+   | macOS | [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) (Apple silicon or Intel) |
+
+   On Windows and macOS, tick **Docker Desktop → Settings → General → Start
+   Docker Desktop when you sign in**, so the server comes back after a
+   restart.
+
+2. Get the server files: `git clone https://github.com/nishantnkumar-cell/vault-server.git`
+   then `cd vault-server`. (Without git: **Code → Download ZIP** on GitHub,
+   unpack it, open a terminal in the folder.)
+
+3. Open `compose.yaml` in a text editor and put your address from step 3 on
+   the `VAULT_SERVER_HOSTS` line:
+
+   ```yaml
+       environment:
+         VAULT_SERVER_HOSTS: "192.168.1.20"
+   ```
+
+   If port 8443 is taken on that computer, change the **first** number of
+   `"8443:8443"` (for example `"9443:8443"`) and set
+   `VAULT_SERVER_PUBLIC_PORT: "9443"`.
+
+4. Start it (the first time takes a few minutes to build):
+
+   ```sh
+   docker compose up -d --build
+   ```
+
+5. Print what you need for step 6:
+
+   ```sh
+   docker compose exec vault-server vault-server show
+   ```
+
+   The output is the same as in 4A step 5. Everything lives in the Docker
+   volume `vault-server-data`; keep it, and the fingerprint stays the same.
+
+### 4C. macOS, without Docker
+
+1. Install Rust as in 4A step 1, and build the same way.
+2. Make a data folder and start it, with your Mac's address:
+
+   ```sh
+   mkdir -p ~/Library/Application\ Support/vault-server
+   export VAULT_SERVER_DATA=~/Library/Application\ Support/vault-server
+   ./target/release/vault-server --hosts 192.168.1.20 init
+   ./target/release/vault-server serve
+   ```
+
+   `init` prints the same text as in 4A step 5. The server runs while that
+   Terminal window is open; starting it at login comes in a later version
+   (for now, use Docker Desktop if you want that).
+
+3. The first time, macOS asks whether `vault-server` may accept incoming
+   network connections: click **Allow**.
+
+## 5. Let your other devices in (firewall)
+
+Devices reach the server on port 8443 (or the one you picked).
+
+| The server computer | What to do |
+|---|---|
+| Linux with no firewall (Debian, Ubuntu default) | Nothing |
+| Linux with `ufw` | `sudo ufw allow 8443/tcp` |
+| Linux with `firewalld` (Fedora) | `sudo firewall-cmd --permanent --add-port=8443/tcp` then `sudo firewall-cmd --reload` |
+| macOS | Allow `vault-server` (or Docker) when macOS asks, or in **System Settings → Network → Firewall → Options** |
+| Windows (Docker Desktop) | Allow Docker Desktop on **Private networks** when asked. Make sure your home network is **Private** (**Settings → Network & internet**, your network, **Network profile type**) |
+
+Check from another computer, with your address:
+
+```sh
+curl -k https://192.168.1.20:8443/
+```
+
+It prints `{"api":1,…,"server":"vault-server",…}`. (`-k` skips the certificate
+check for this test; Secret Vault checks the fingerprint instead.) If it
+hangs or says `Connection refused`, check the firewall and the address.
+
+## 6. Connect your first computer
+
+On the computer whose vault you want to sync, unlock the vault.
+
+**In the desktop app:** **Sync** in the sidebar → under **Cloud sync is off**,
+pick **A server on my own computer (Docker)** (it works for this server
+however you run it) → fill in **Server address**,
+**Fingerprint** and **Admin key** from `show` → **Set up**. After a few
+seconds the card says **Cloud sync is on**.
+
+**With the command line:** copy the last line `show` printed:
+
+```sh
+vault cloud setup --server https://192.168.1.20:8443 --fingerprint tbCvXr6N001Lm6NUgBwIgyL5MjAWEOiHLXJ0gQT5dRQ
+```
+
+It asks for the admin key (paste it; it is not shown). Add
+`--name "Alex's laptop"` to choose how this computer appears in the device
+list.
+
+Then make sure the sync helper `vault-sync` runs on this computer, as in
+the vault user guide, chapter 15, step 3 (on Linux, `systemctl --user enable
+--now vault-sync`). It is the part that talks to the server.
+
+Check on the server: `vault-server status` (4A: run it with
+`sudo -u vault-server VAULT_SERVER_DATA=/var/lib/vault-server`; 4B: with
+`docker compose exec vault-server`) lists one vault with one device.
+
+## 7. Add more devices, including your phone
+
+On a device that already syncs, make a **join link**. It works once and for
+ten minutes, and holds no password or key.
+
+- Desktop app: **Sync → Add a device**. It shows the link and a QR code.
+- Command line: `vault cloud link`
+
+Then on the new device:
+
+| New device | What to do |
+|---|---|
+| Linux or macOS desktop app | No vault yet: on the welcome screen click **I already use Secret Vault on another device**, paste the link under **With cloud sync**, **Join with the link**. Vault already unlocked there: **Sync → Join with a link from another device** |
+| Command line | `vault cloud join 'https://192.168.1.20:8443/join#v1.…'` |
+| iPhone or iPad | No vault yet: **Join with a Link from My Computer**. Already using the vault: **Settings → Cloud Sync → Join with a Link from My Computer**. Scan the QR code or paste the link. The phone asks once to find devices on your local network: tap **Allow** |
+
+On a computer, start the `vault-sync` helper there too. Unlock with your
+master password and the device is in. Changes reach the
+other unlocked devices within about 10 seconds.
+
+To cut off a lost or sold device: **Sync → Devices → Remove**, or
+`vault cloud devices` then `vault cloud remove ID`. The server closes its
+connection at once.
+
+## 8. Day to day: status, history, undoing a bad save
+
+Commands on the server computer (prefix them as in section 6):
+
+| Command | What it does |
+|---|---|
+| `vault-server status` | Each vault: its version, size, last save, devices and their last contact |
+| `vault-server show` | The address, fingerprint and admin key again |
+| `vault-server history MAILBOX` | The kept versions of one vault's file (the last 20, up to 30 days) |
+| `vault-server restore MAILBOX VERSION` | Make an older version the newest again |
+
+**Undoing a bad save.** If a device wrote something you did not want (for
+example after restoring an old backup on it), find the version from before
+in `history` and `restore` it. Every device downloads it within 15 minutes
+and **merges** it with what it has, so this brings back deleted or changed
+items; it does not remove items added since. Deleted items you want gone
+again can simply be deleted again.
+
+## Moving from the old Docker server in the vault repo
+
+The old server (`server/sync` in the vault repo) and this one speak the same
+protocol, but they keep their data differently. Until the import tool
+arrives, move by setting up again; your vault stays on every device the whole
+time, so nothing is lost.
+
+1. Start vault-server (section 4) on a **different port** than the old one,
+   for example 9443, or stop the old one first with `docker compose down`
+   in the vault repo's `server/sync` folder.
+2. On every device **except** your first computer: **Sync → Turn off on this
+   computer**, or `vault cloud off`.
+3. On your first computer: **Sync → Turn off everywhere…**, or
+   `vault cloud off --everywhere`. This deletes the vault's copy from the old
+   server only.
+4. On your first computer, set up with the new server (section 6).
+5. On each other device, join with a new link (section 7). Each one merges
+   its own copy, so edits made in between are kept.
+6. When everything syncs, remove the old container and volume:
+   `docker compose down -v` in the old `server/sync` folder.
+
+## 10. Away from home
+
+The server is reachable where its address is, which is usually only your
+home network. Devices that leave home keep working with their own copy and
+sync again when they are back. To sync away from home, use a VPN into your
+home network (many routers have one built in, or use WireGuard or Tailscale)
+and add the VPN address of the server computer to `VAULT_SERVER_HOSTS`, then
+restart the server: it makes a new certificate for the extra address, with
+the same fingerprint, so devices keep working.
+
+Do not forward port 8443 on your router to the internet unless you know you
+want that; the server is built for a home network.
+
+## 11. Updating the server
+
+- **Linux service (4A):** `git pull`, `cargo build --release`,
+  `sudo install -m 755 target/release/vault-server /usr/local/bin/`,
+  `sudo systemctl restart vault-server`.
+- **Docker (4B):** `git pull`, then `docker compose up -d --build`.
+- **macOS (4C):** `git pull`, `cargo build --release`, start it again.
+
+Your vaults, devices and the fingerprint stay.
+
+## 12. Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| `vault cloud setup` says the fingerprint does not match | Copy it again from `show`. If it still differs, something else answers on that address: check the address |
+| `could not reach the server` | Check section 5 (firewall), that the server runs (`systemctl status vault-server` or `docker compose ps`), and that the device is on the home network |
+| `the certificate is not valid for` the address | Add that name or address to `VAULT_SERVER_HOSTS` and restart the server |
+| `wrong admin key` | Copy it again from `show` (it is also in the file `admin-key` in the data folder) |
+| `this join link was used already or has expired` | Make a new link; each works once, for ten minutes |
+| `vault-server status` says `no server data` | Point it at the data folder: `VAULT_SERVER_DATA=/var/lib/vault-server` (and run as the `vault-server` user) |
+| The service does not start | `journalctl -u vault-server -n 50` shows why |
+
+## 13. Differences between Linux, macOS and Windows
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Run the server without Docker | Yes, as a systemd service that starts at boot | Yes, from Terminal; starting at login comes later | No |
+| Run the server in Docker | Docker Engine | Docker Desktop | Docker Desktop (WSL 2) |
+| Where its data is | `/var/lib/vault-server` (service) or the Docker volume | The folder you chose, or the Docker volume | The Docker volume |
+| Firewall step | `ufw` / `firewalld` if used | Allow when asked | Allow on Private networks |
+| Sync from the vault apps | Desktop app and `vault` | Desktop app and `vault` | The Windows app is on hold; it uses the same protocol |
+| iPhone and iPad | Join with link or QR, any server computer | | |

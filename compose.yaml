@@ -1,0 +1,27 @@
+# Secret Vault server on your own computer, in Docker (docs/user-guide.md).
+#
+#   1. Put the names or addresses your other devices use to reach this
+#      computer in VAULT_SERVER_HOSTS below.
+#   2. docker compose up -d --build
+#   3. docker compose exec vault-server vault-server show
+services:
+  vault-server:
+    build: .
+    image: vault-server:local
+    restart: unless-stopped
+    environment:
+      # Comma-separated: this computer's name on your network and/or its
+      # fixed IP address, such as "vault.home.example,192.168.1.20".
+      VAULT_SERVER_HOSTS: "192.168.1.20"
+      # If you publish another port than 8443 below, put it here too.
+      # VAULT_SERVER_PUBLIC_PORT: "8443"
+    ports:
+      - "8443:8443"
+    volumes:
+      - vault-server-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  vault-server-data:
