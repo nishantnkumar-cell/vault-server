@@ -3,7 +3,7 @@
 Newest first. Each release says what is new for you, what you need to do, and
 what differs between Linux, macOS and Windows.
 
-## 0.3.0 (not released yet): Linux packages and moving from the old Docker server
+## 0.3.0 (2026-11-24): Linux packages and moving from the old Docker server
 
 ### What's new
 
@@ -45,7 +45,7 @@ The packages are for Linux on x86-64. macOS and Windows are unchanged (see
 - `vault-server import` has been tried on files built to the old server's documented layout (and carries its authority over), not on a volume written by a real workerd: stop the old server before importing and keep your copy until the new one works.
 - Google Drive, OneDrive and Dropbox backup targets are not available yet.
 
-## 0.2.0 (not released yet): sealed backups
+## 0.2.0 (first released in 0.3.0): sealed backups
 
 ### What's new
 
@@ -88,7 +88,7 @@ folder into the container to use a folder target.
 - The recovery code is the seed in base32 groups, not 24 words.
 - Packages and the Docker import came in 0.3.0.
 
-## 0.1.0 (not released yet): the server itself
+## 0.1.0 (first released in 0.3.0): the server itself
 
 The first version of **vault-server**, a sync server you run on a computer of
 your own. It replaces the Docker sync server in the vault repo (user guide
