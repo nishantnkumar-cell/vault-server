@@ -312,6 +312,7 @@ Commands on the server computer (prefix them as in section 6):
 | `vault-server show` | The address, fingerprint and admin key again |
 | `vault-server history MAILBOX` | The kept versions of one vault's file (the last 20, up to 30 days) |
 | `vault-server restore MAILBOX VERSION` | Make an older version the newest again |
+| `vault-server backup ...` | Sealed backups: see section 9 |
 
 **Undoing a bad save.** If a device wrote something you did not want (for
 example after restoring an old backup on it), find the version from before
@@ -319,6 +320,96 @@ in `history` and `restore` it. Every device downloads it within 15 minutes
 and **merges** it with what it has, so this brings back deleted or changed
 items; it does not remove items added since. Deleted items you want gone
 again can simply be deleted again.
+
+## 9. Backups
+
+The server can copy everything it holds to a place of your choice, sealed so
+that only you can open it. Do this once; after that it runs by itself while
+the server runs.
+
+**What a backup holds:** every vault's current file, the devices allowed to
+use it (only the fingerprint of each device key), and the server's own
+certificate authority and admin key. That last part is why restoring needs
+no new setup on your devices: they keep their keys and the fingerprint they
+already trust.
+
+**Step 1. Add a place for backups.** Use a USB disk, a NAS share, or a
+folder that another program (OneDrive, Google Drive, Dropbox, Syncthing)
+already syncs:
+
+```sh
+vault-server backup add folder /mnt/usb-disk/vault-backups
+```
+
+The first time, this shows the **backup recovery code** once. **Write it
+down or print it now**, and keep it somewhere other than this computer (a
+secure note in your own vault is fine, but not the only copy). It is the
+only key to the backups: without it nobody can open them, you included.
+The server keeps only the matching public key, so a thief of the server or
+of the disk cannot read them either.
+
+**Step 2. Make one now** and check it:
+
+```sh
+vault-server backup now
+vault-server backup list
+```
+
+From then on a backup is made 10 minutes after the last change (a burst of
+edits makes one backup) and at least once a day, while `vault-server serve`
+runs. It is written, read back and compared, so a failing disk is noticed.
+`vault-server status` shows when each target last worked, or that it is
+failing and why.
+
+**How many are kept:** the newest of each of the last 7 days, 4 weeks and 12
+months; older ones are deleted from the target.
+
+| Command | What it does |
+|---|---|
+| `vault-server backup add folder PATH [--name NAME]` | Add a target |
+| `vault-server backup remove NAME` | Stop using a target (its files stay) |
+| `vault-server backup list` | Targets, how the last backup went, snapshots kept |
+| `vault-server backup now` | Make a backup right away |
+| `vault-server backup restore --from TARGET` | Look inside a backup, or restore it |
+
+Google Drive, OneDrive and Dropbox cannot be added directly yet. Until
+then, point a folder target at the folder your Google Drive, OneDrive or
+Dropbox app syncs; the files in it are sealed, so the provider sees nothing.
+
+### Restoring after losing the server
+
+1. Install `vault-server` on the new computer and run `vault-server init`
+   (use the same `--hosts` as before, or the new address).
+2. Look inside the backup. You are asked for the recovery code:
+
+   ```sh
+   vault-server backup restore --from /mnt/usb-disk/vault-backups
+   ```
+
+   It lists the vaults and their devices and **changes nothing**.
+3. If you removed a device (a lost phone) after that backup was made, name it
+   so it does not get its access back: `--drop DEVICE_ID` (repeat for each).
+4. Restore for real, into this new, empty server:
+
+   ```sh
+   vault-server backup restore --from /mnt/usb-disk/vault-backups --drop 3f9a1c2b --confirm
+   ```
+
+5. Start the server. Your devices reconnect with their old keys and the same
+   fingerprint; nothing to set up again. Add a backup target again.
+
+A server that already has vaults refuses a restore. Use a new data folder.
+
+**Only need one vault's file?** Take it out without a server and open it with
+your master password:
+
+```sh
+vault-server backup restore --from /mnt/usb-disk/vault-backups \
+    --mailbox MAILBOX_ID --out vault.svault
+```
+
+You can type the recovery code when asked, or set `VAULT_BACKUP_CODE` for a
+script (it then shows in the environment, so avoid that on a shared computer).
 
 ## Moving from the old Docker server in the vault repo
 

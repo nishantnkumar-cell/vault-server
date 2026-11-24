@@ -8,6 +8,7 @@ use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand};
 
 use vault_server::api::when;
+use vault_server::backup;
 use vault_server::server::{self, Config};
 use vault_server::store::Store;
 use vault_server::{tls, util};
@@ -78,6 +79,53 @@ enum Cmd {
         /// The version number, from `vault-server history`.
         version: i64,
     },
+    /// Sealed backups of everything this server keeps.
+    Backup {
+        #[command(subcommand)]
+        cmd: BackupCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum BackupCmd {
+    /// Add a place to keep backups: `folder PATH` (a USB disk, NAS share or a
+    /// folder some other program syncs). The first one makes the backup key
+    /// and shows its recovery code once.
+    Add {
+        /// folder (google, onedrive and dropbox need this program's cloud
+        /// registration and are not available yet)
+        kind: String,
+        path: Option<PathBuf>,
+        /// A short name for the target (default folder1, folder2, ...).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Stop using a backup target (its files stay where they are).
+    Remove { name: String },
+    /// List the targets, how the last backup went, and the snapshots kept.
+    List,
+    /// Make a backup now.
+    Now,
+    /// Open a backup: list its devices, or put it into a new, empty server.
+    Restore {
+        /// A target name, a folder of snapshots, or one `.svbak` file.
+        #[arg(long)]
+        from: String,
+        /// Which snapshot (default: the newest).
+        #[arg(long)]
+        snapshot: Option<String>,
+        /// Leave this device out (one removed after the backup was made).
+        #[arg(long = "drop")]
+        drop: Vec<String>,
+        /// Really restore (without it only the contents are shown).
+        #[arg(long)]
+        confirm: bool,
+        /// With --out: take just this vault's file out of the backup.
+        #[arg(long, requires = "out")]
+        mailbox: Option<String>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 fn config(c: &Common, http_loopback: Option<SocketAddr>) -> Result<Config> {
@@ -142,6 +190,7 @@ async fn run(cli: Cli) -> Result<()> {
             if let Some(h) = running.http {
                 tracing::warn!("also plain HTTP on {h}, for this computer only");
             }
+            tokio::spawn(backup::schedule(cfg.data.clone()));
             tokio::select! {
                 _ = running_wait(running) => bail!("the server stopped"),
                 _ = shutdown() => tracing::info!("stopping"),
@@ -155,6 +204,7 @@ async fn run(cli: Cli) -> Result<()> {
                     "No vaults yet. Run `vault cloud setup --server ...` on your first computer."
                 );
             }
+            print_backup_summary(&cli.common.data);
             for m in list {
                 println!(
                     "{}  version {}, {} bytes, saved {}, {} device(s), {} version(s) kept",
@@ -170,6 +220,7 @@ async fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
+        Cmd::Backup { cmd } => backup_cmd(&cli.common, cmd)?,
         Cmd::History { mailbox } => {
             mailbox_arg(&mailbox)?;
             let store = open_store(&cli.common)?;
@@ -194,6 +245,189 @@ async fn run(cli: Cli) -> Result<()> {
                 ),
                 None => bail!("that version is not kept; see `vault-server history {mailbox}`"),
             }
+        }
+    }
+    Ok(())
+}
+
+fn print_backup_summary(data: &std::path::Path) {
+    let targets = backup::targets(data);
+    if targets.is_empty() {
+        println!("Backups: none yet (`vault-server backup add folder PATH`).");
+        return;
+    }
+    let st = backup::statuses(data);
+    for t in targets {
+        let s = st.get(&t.name).cloned().unwrap_or_default();
+        match (s.ok, s.error) {
+            (Some(ok), None) => println!("Backup {}: last good {}", t.name, when(ok)),
+            (ok, Some(e)) => println!(
+                "Backup {}: FAILING ({e}); last good {}",
+                t.name,
+                ok.map(when).unwrap_or_else(|| "never".into())
+            ),
+            (None, None) => println!("Backup {}: not made yet", t.name),
+        }
+    }
+}
+
+fn read_code() -> Result<[u8; 32]> {
+    use std::io::Write;
+    let text = match std::env::var("VAULT_BACKUP_CODE") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => {
+            eprint!("Backup recovery code: ");
+            std::io::stderr().flush().ok();
+            let mut l = String::new();
+            std::io::stdin().read_line(&mut l)?;
+            l
+        }
+    };
+    backup::parse_code(&text)
+}
+
+/// Finds the sealed bytes for `--from` (a target name, a folder or a file).
+fn find_snapshot(data: &std::path::Path, from: &str, which: Option<&str>) -> Result<Vec<u8>> {
+    let as_target = backup::targets(data).into_iter().find(|t| t.name == from);
+    let folder = match &as_target {
+        Some(t) => t.clone(),
+        None => {
+            let p = std::path::Path::new(from);
+            if p.is_file() {
+                return Ok(std::fs::read(p)?);
+            }
+            backup::Target {
+                name: from.into(),
+                kind: "folder".into(),
+                path: from.into(),
+            }
+        }
+    };
+    let list = folder.list()?;
+    let name = match which {
+        Some(n) => n.to_string(),
+        None => list
+            .last()
+            .map(|x| x.0.clone())
+            .ok_or_else(|| anyhow::anyhow!("no backups found in {from}"))?,
+    };
+    folder.get(&name)
+}
+
+fn backup_cmd(c: &Common, cmd: BackupCmd) -> Result<()> {
+    let data = &c.data;
+    match cmd {
+        BackupCmd::Add { kind, path, name } => match kind.as_str() {
+            "folder" => {
+                let Some(path) = path else {
+                    bail!("usage: vault-server backup add folder PATH");
+                };
+                let code = backup::add_folder(data, name.as_deref(), &path)?;
+                println!("Added the backup folder {}.", path.display());
+                if let Some(code) = code {
+                    println!(
+                        "\nBACKUP RECOVERY CODE (shown once; print it or keep it in your vault):\n\n    {code}\n\nWithout it nobody can open the backups, you included. With it, anyone who\nhas a backup file can. This server keeps only the matching public key."
+                    );
+                }
+                println!(
+                    "\nA backup is made 10 minutes after the last change and at least daily while\n`vault-server serve` runs. Make one now with `vault-server backup now`."
+                );
+            }
+            "google" | "onedrive" | "dropbox" => bail!(
+                "{kind} backups are not available yet: they need this program registered with {kind}. \
+                 Use `backup add folder PATH` with a folder that your {kind} app syncs for now."
+            ),
+            other => bail!("unknown backup kind {other}; use folder"),
+        },
+        BackupCmd::Remove { name } => {
+            backup::remove_target(data, &name)?;
+            println!("Removed {name}. Its files were left where they are.");
+        }
+        BackupCmd::List => {
+            print_backup_summary(data);
+            for t in backup::targets(data) {
+                println!("\n{}  ({}, {})", t.name, t.kind, t.path);
+                match t.list() {
+                    Ok(l) if l.is_empty() => println!("    no snapshots yet"),
+                    Ok(l) => {
+                        for (n, ms) in l.iter().rev() {
+                            println!("    {n}  {}", when(*ms));
+                        }
+                    }
+                    Err(e) => println!("    cannot read: {e:#}"),
+                }
+            }
+        }
+        BackupCmd::Now => {
+            let mut store = open_store(c)?;
+            let mut bad = 0;
+            for (t, r) in backup::run_once(data, &mut store)? {
+                match r {
+                    Ok(n) => println!("{t}: wrote {n}"),
+                    Err(e) => {
+                        bad += 1;
+                        eprintln!("{t}: FAILED: {e:#}");
+                    }
+                }
+            }
+            if bad > 0 {
+                bail!("{bad} backup target(s) failed");
+            }
+        }
+        BackupCmd::Restore {
+            from,
+            snapshot,
+            drop,
+            confirm,
+            mailbox,
+            out,
+        } => {
+            let blob = find_snapshot(data, &from, snapshot.as_deref())?;
+            let snap = backup::read_snapshot(read_code()?, &blob)?;
+            if let (Some(id), Some(out)) = (&mailbox, &out) {
+                mailbox_arg(id)?;
+                let m = snap
+                    .mailboxes
+                    .iter()
+                    .find(|m| &m.id == id)
+                    .ok_or_else(|| anyhow::anyhow!("that backup has no such vault"))?;
+                let Some(f) = &m.file else {
+                    bail!("that vault was still empty in this backup");
+                };
+                std::fs::write(out, data_encoding::BASE64URL_NOPAD.decode(f.as_bytes())?)?;
+                println!(
+                    "Wrote {}: open it with your master password (`vault sync on` / `vaultd --vault`).",
+                    out.display()
+                );
+                return Ok(());
+            }
+            println!("Backup made {}:", when(snap.created));
+            for m in &snap.mailboxes {
+                println!("  vault {}  version {}", m.id, m.version);
+                for d in &m.devices {
+                    let dropped = if drop.contains(&d.id) {
+                        "  (will be left out)"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "      device {}  {}  last seen {}{dropped}",
+                        d.id,
+                        d.name,
+                        when(d.seen)
+                    );
+                }
+            }
+            if !confirm {
+                println!(
+                    "\nNothing was changed. If a device above was removed after this backup, add\n`--drop DEVICE` for it, then run again with `--confirm` to restore into this\nnew, empty server."
+                );
+                return Ok(());
+            }
+            backup::restore(data, &snap, &drop)?;
+            println!(
+                "\nRestored. Start the server (`vault-server serve`); devices reconnect with their\nold keys and the same fingerprint. Add a backup target again with `backup add`."
+            );
         }
     }
     Ok(())

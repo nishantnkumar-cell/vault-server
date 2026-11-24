@@ -6,6 +6,7 @@
 //! the devices. See docs/how-it-works.md.
 
 pub mod api;
+pub mod backup;
 pub mod files;
 pub mod server;
 pub mod store;
