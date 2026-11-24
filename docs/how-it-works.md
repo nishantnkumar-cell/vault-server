@@ -89,6 +89,36 @@ ML-KEM, so they connect with X25519. A small change in the vault repo
 (rustls with aws-lc-rs in `vault-cloud` and `vault-mobile`) moves them to the
 hybrid; nothing on the server side changes for that.
 
+## Backups
+
+`vault-server backup add` makes the **backup key**, an X-Wing key pair
+(ML-KEM-768 + X25519, the same code the vault uses for shared collections).
+The server keeps `backup.pub`; the secret half is shown once as a recovery
+code (the 32-byte seed, 13 groups of 4 characters) and never stored.
+
+A snapshot is JSON: each mailbox's current file (base64url), version, and
+devices (token SHA-256 only), plus `admin-key`, `hosts`, `tls/ca.pem` and
+`tls/ca.key`. It is sealed with a fresh X-Wing encapsulation to the backup
+key; the shared secret is the key for XChaCha20-Poly1305 with a random
+24-byte nonce, and the format tag is the associated data:
+
+```
+"SVBK1\0" | X-Wing ciphertext (1120) | nonce (24) | AEAD ciphertext + tag
+```
+
+A changed file fails the tag and is refused, never half-restored. File
+names are `vault-server-YYYYMMDD-HHMMSS.svbak` (UTC). A target is written to
+`NAME.part`, renamed, read back and compared by SHA-256. Retention keeps the
+newest snapshot of each of the last 7 days, 4 ISO weeks and 12 months, and
+always the newest overall. Target settings are in `backup.json`, results in
+`backup-status.json`, both mode 0600. The scheduler in `serve` checks once a
+minute: due when something was saved and 10 minutes have passed since, or the
+last good backup is a day old; after a failure it waits 5 minutes.
+
+Restore reads the whole snapshot first, lists the devices, and writes into
+the database only with `--confirm`, in one transaction, into a server that
+has no vaults.
+
 ## What the server sees
 
 When devices sync, from which addresses, the size of each file, device names

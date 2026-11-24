@@ -8,8 +8,9 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 
 use crate::util::{now_ms, random_hex, sha256_hex};
 
@@ -430,5 +431,109 @@ mod tests {
         let (t2, _) = s.ticket(&mb).unwrap().unwrap();
         assert_eq!(s.join(&mb, &t2, &phone, "again").unwrap(), Join::TokenInUse);
         assert_eq!(s.devices(&mb).unwrap().len(), 2);
+    }
+}
+
+/// One device as a backup keeps it (the token only as its SHA-256).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceRow {
+    pub id: String,
+    pub name: String,
+    pub token: String,
+    pub created: i64,
+    pub seen: i64,
+}
+
+/// One mailbox as a backup keeps it: the current file and the devices.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MailboxRow {
+    pub id: String,
+    pub version: i64,
+    pub created: i64,
+    pub saved: i64,
+    /// The current file, base64url; `None` while the mailbox is empty.
+    pub file: Option<String>,
+    pub devices: Vec<DeviceRow>,
+}
+
+impl Store {
+    /// Everything a backup needs, read in one transaction so it is consistent.
+    pub fn export(&mut self) -> Result<Vec<MailboxRow>> {
+        use data_encoding::BASE64URL_NOPAD;
+        let tx = self.db.transaction()?;
+        let mut out = Vec::new();
+        {
+            let mut st =
+                tx.prepare("SELECT id, version, created FROM mailboxes ORDER BY created, id")?;
+            let rows: Vec<(String, i64, i64)> = st
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<Result<_, _>>()?;
+            for (id, version, created) in rows {
+                let file: Option<(i64, Vec<u8>)> = tx
+                    .query_row(
+                        "SELECT saved, data FROM files WHERE mailbox = ? AND version = ?",
+                        params![id, version],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                let mut dv = tx.prepare(
+                    "SELECT id, name, token, created, seen FROM devices WHERE mailbox = ? ORDER BY created, id",
+                )?;
+                let devices = dv
+                    .query_map([&id], |r| {
+                        Ok(DeviceRow {
+                            id: r.get(0)?,
+                            name: r.get(1)?,
+                            token: r.get(2)?,
+                            created: r.get(3)?,
+                            seen: r.get(4)?,
+                        })
+                    })?
+                    .collect::<Result<_, _>>()?;
+                out.push(MailboxRow {
+                    id,
+                    version,
+                    created,
+                    saved: file.as_ref().map_or(0, |f| f.0),
+                    file: file.map(|f| BASE64URL_NOPAD.encode(&f.1)),
+                    devices,
+                });
+            }
+        }
+        tx.commit()?;
+        Ok(out)
+    }
+
+    /// Loads backed-up mailboxes into a server that has none yet.
+    pub fn import(&mut self, rows: &[MailboxRow]) -> Result<()> {
+        use data_encoding::BASE64URL_NOPAD;
+        let tx = self.db.transaction()?;
+        let have: i64 = tx.query_row("SELECT count(*) FROM mailboxes", [], |r| r.get(0))?;
+        if have > 0 {
+            bail!("this server already keeps vaults; restore only into a new, empty server");
+        }
+        for m in rows {
+            tx.execute(
+                "INSERT INTO mailboxes (id, version, created) VALUES (?, ?, ?)",
+                params![m.id, m.version, m.created],
+            )?;
+            if let Some(f) = &m.file {
+                let data = BASE64URL_NOPAD
+                    .decode(f.as_bytes())
+                    .map_err(|_| anyhow::anyhow!("the backup holds a damaged vault file"))?;
+                tx.execute(
+                    "INSERT INTO files (mailbox, version, saved, data) VALUES (?, ?, ?, ?)",
+                    params![m.id, m.version, m.saved, data],
+                )?;
+            }
+            for d in &m.devices {
+                tx.execute(
+                    "INSERT INTO devices (mailbox, id, name, token, created, seen) VALUES (?, ?, ?, ?, ?, ?)",
+                    params![m.id, d.id, d.name, d.token, d.created, d.seen],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 }

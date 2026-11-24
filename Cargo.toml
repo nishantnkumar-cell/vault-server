@@ -1,6 +1,6 @@
 [package]
 name = "vault-server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Sync and backup server for Secret Vault: speaks the vault sync API 1, post-quantum TLS, own certificate authority."
 license = "PolyForm-Noncommercial-1.0.0"
@@ -8,6 +8,7 @@ repository = "https://github.com/nishantnkumar-cell/vault-server"
 publish = false
 
 [dependencies]
+chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc"] }
 anyhow = "1.0.105"
 axum = { version = "0.8.9", features = ["ws"] }
 clap = { version = "4.6.9", features = ["derive", "env"] }
@@ -24,6 +25,7 @@ serde_json = "1.0.154"
 sha2 = "0.11.1"
 subtle = "2.6.1"
 time = "0.3.55"
+vault-core = { git = "https://github.com/nishantnkumar-cell/PasswordVault", rev = "bfa0cb7263a0d5785ac27f84f40ca444a61944ef" }
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
 tower = "0.5.3"
