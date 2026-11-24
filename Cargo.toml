@@ -40,3 +40,10 @@ serde_json = "1.0.154"
 tempfile = "3.27.0"
 tokio-rustls = "0.26.6"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+
+# vault-core pins ml-dsa 0.0.4, which has RUSTSEC-2025-0144 (a timing
+# side-channel). The vault repo patches it with a vendored copy that has the
+# upstream fix backported; cargo does not carry that patch through a git
+# dependency, so repeat it here. Remove when vault-core moves to ml-dsa >= 0.1.
+[patch.crates-io]
+ml-dsa = { git = "https://github.com/nishantnkumar-cell/PasswordVault", rev = "bfa0cb7263a0d5785ac27f84f40ca444a61944ef" }
