@@ -1,0 +1,32 @@
+# Arch Linux package for vault-server, built from this source tree.
+# Use contrib/arch/build.sh; CI runs it in an Arch container.
+pkgname=vault-server
+pkgver=${VAULT_PKGVER:-0.0.0}
+pkgrel=1
+pkgdesc="Sync and backup server for Secret Vault: post-quantum TLS, own certificate authority, sealed backups"
+arch=(x86_64)
+url="https://github.com/nishantnkumar-cell/vault-server"
+license=(LicenseRef-PolyForm-Noncommercial-1.0.0)
+depends=(glibc gcc-libs systemd)
+makedepends=(cargo)
+backup=(etc/vault-server/env)
+options=(!lto !debug)
+
+# The source is this checkout (two levels up), not a download.
+_tree=$(cd "$startdir/../.." && pwd)
+
+build() {
+    cd "$_tree"
+    cargo build --release --locked
+}
+
+check() {
+    cd "$_tree"
+    test "$(target/release/vault-server --version)" = "vault-server ${VAULT_VERSION:-$pkgver}"
+}
+
+package() {
+    cd "$_tree"
+    contrib/package/stage.sh "$pkgdir"
+    install -Dm644 LICENSE.md "$pkgdir/usr/share/licenses/$pkgname/LICENSE.md"
+}

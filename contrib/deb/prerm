@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+# Stop the service on removal, not on an upgrade (postinst restarts it).
+if [ "$1" = remove ] && systemctl is-active --quiet vault-server 2>/dev/null; then
+    systemctl stop vault-server || true
+fi
+if [ "$1" = remove ]; then
+    systemctl disable vault-server >/dev/null 2>&1 || true
+fi
+exit 0

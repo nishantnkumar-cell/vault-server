@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 permissions:
@@ -91,3 +92,112 @@ jobs:
           for i in $(seq 30); do curl -sfk https://localhost:8443/ >/dev/null && break; sleep 1; done
           fp=$(./target/debug/vault-server --data "$d" show | awk '/fingerprint:/{print $2}')
           vault/target/debug/examples/compat-check https://localhost:8443 "$fp" "$(cat "$d/admin-key")"
+
+  # The .deb is installed with real dpkg and started by systemd, then removed.
+  deb:
+    name: Debian package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - run: contrib/deb/build.sh
+      - name: Install, start, check, remove
+        run: |
+          set -eux
+          ver=$(contrib/package/version.sh)
+          deb=target/packages/vault-server_${ver}_amd64.deb
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb" | grep -q ./usr/bin/vault-server
+          sudo apt-get install -y "./$deb"
+          test "$(vault-server --version)" = "vault-server $ver"
+          getent passwd vault-server
+          test "$(stat -c '%a %U' /etc/vault-server/env)" = "600 root"
+          systemd-analyze verify /usr/lib/systemd/system/vault-server.service
+          # Not started by the install: it needs its host names first.
+          ! systemctl is-active --quiet vault-server
+          echo 'VAULT_SERVER_HOSTS=localhost' | sudo tee -a /etc/vault-server/env
+          sudo systemctl enable --now vault-server
+          for i in $(seq 30); do sudo test -f /var/lib/vault-server/tls/ca.pem && break; sleep 1; done
+          for i in $(seq 30); do curl -sf --cacert <(sudo cat /var/lib/vault-server/tls/ca.pem) https://localhost:8443/ && break; sleep 1; done
+          sudo systemctl is-active vault-server
+          # Upgrading in place keeps the data and restarts the server.
+          sudo apt-get install -y --reinstall "./$deb"
+          sudo systemctl is-active vault-server
+          sudo test -f /var/lib/vault-server/tls/ca.pem
+          sudo apt-get remove -y vault-server
+          test ! -e /usr/bin/vault-server
+          ! systemctl is-active --quiet vault-server
+          # Removing the program keeps the data.
+          sudo test -f /var/lib/vault-server/tls/ca.pem
+      - run: contrib/package/tarball.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            target/packages/*.deb
+            target/packages/*.tar.gz
+
+  # The Arch package, built and installed in an Arch container.
+  arch:
+    name: Arch package
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - run: pacman -Syu --noconfirm --needed git rust systemd
+      - uses: actions/checkout@v4
+      # makepkg refuses to run as root.
+      - name: Build the package
+        run: |
+          useradd -m builder
+          chown -R builder "$GITHUB_WORKSPACE"
+          su builder -c "cd '$GITHUB_WORKSPACE' && CARGO_HOME=/home/builder/.cargo contrib/arch/build.sh"
+      - name: Check the package
+        run: |
+          ver=$(contrib/package/version.sh)
+          pkg=target/packages/vault-server-$ver-x86_64.pkg.tar.zst
+          pacman -Qip "$pkg"
+          pacman -Qlp "$pkg" | grep -q /usr/bin/vault-server
+          pacman -U --noconfirm "$pkg"
+          test "$(vault-server --version)" = "vault-server $ver"
+          test "$(stat -c '%a %U' /etc/vault-server/env)" = "600 root"
+          pacman -R --noconfirm vault-server
+          test ! -e /usr/bin/vault-server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: target/packages/*.pkg.tar.zst
+
+  # A tag such as v0.3.0 drafts a GitHub release with the packages attached;
+  # it stays a draft until someone publishes it.
+  release:
+    name: Draft release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, macos, docker, vault-client, deb, arch]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches Cargo.toml
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          want=$(contrib/package/version.sh)
+          test "${TAG#v}" = "$want" || { echo "::error::tag $TAG does not match version $want in Cargo.toml"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          mkdir dist
+          cp artifacts/*/* dist/
+          (cd dist && sha256sum -- * > SHA256SUMS.txt)
+          ls -l dist
+          gh release create "$TAG" dist/* --draft --title "vault-server ${TAG#v}" \
+            --notes "See docs/release-notes.md. Packages: .deb (Debian 13, Ubuntu 24.04 and newer), Arch, and a .tar.gz for any Linux with systemd. Check downloads against SHA256SUMS.txt."
+

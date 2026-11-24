@@ -1,0 +1,13 @@
+# Settings for the vault-server service, read by systemd as root.
+# Uncomment and change, then: sudo systemctl restart vault-server
+#
+# The names and addresses your other devices use to reach this computer,
+# comma-separated. The certificate is made for them.
+#VAULT_SERVER_HOSTS=vault.home.example,192.168.1.20
+#
+# Where to listen (default: every address, port 8443).
+#VAULT_SERVER_LISTEN=0.0.0.0:8443
+#
+# Use this admin key instead of the one in /var/lib/vault-server/admin-key.
+# Keep this file readable by root only.
+#ADMIN_KEY=

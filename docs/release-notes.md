@@ -3,6 +3,42 @@
 Newest first. Each release says what is new for you, what you need to do, and
 what differs between Linux, macOS and Windows.
 
+## 0.3.0 (not released yet): Linux packages
+
+### What's new
+
+- **A `.deb` for Debian 13 and Ubuntu 24.04 or newer**, an **Arch Linux
+  package**, and a **`.tar.gz`** for any other Linux with systemd. Each
+  installs the program, the `vault-server` systemd service (hardened, as its
+  own user) and its settings file `/etc/vault-server/env`, so there is no
+  Rust to install and no building. See [section 4A of the user guide](user-guide.md#4a-linux-from-a-package-easiest).
+- **Safe by default.** The service is not started by the install (it needs
+  your addresses first); upgrading restarts it and keeps everything; removing
+  the package keeps `/var/lib/vault-server`.
+- **Checked on every change**: CI installs the `.deb` with real dpkg, starts
+  the service under systemd and talks to it over TLS, upgrades it in place and
+  removes it; it builds, installs and removes the Arch package in an Arch
+  container. A tag such as `v0.3.0` drafts a release with the files and a
+  `SHA256SUMS.txt`.
+
+### What you need to do
+
+Nothing for an existing server. To move a hand-installed server to the
+package, install it over the same data folder: `/var/lib/vault-server` is the
+same, so the fingerprint and devices stay. Stop and disable your own
+`/etc/systemd/system/vault-server.service` first (the package's file is the
+one in `/usr/lib/systemd/system`).
+
+### Differences between systems
+
+The packages are for Linux on x86-64. macOS and Windows are unchanged (see
+0.1.0).
+
+### Known limits
+
+- Importing the old Docker server's data (`vault-server import`) is still to come.
+- Google Drive, OneDrive and Dropbox backup targets are not available yet.
+
 ## 0.2.0 (not released yet): sealed backups
 
 ### What's new
@@ -44,7 +80,7 @@ folder into the container to use a folder target.
   this program registered with each of them. A folder those apps sync works
   now.
 - The recovery code is the seed in base32 groups, not 24 words.
-- `.deb` and Arch packages, and importing the old Docker volume, are next.
+- Packages came in 0.3.0; importing the old Docker volume is still to come.
 
 ## 0.1.0 (not released yet): the server itself
 
