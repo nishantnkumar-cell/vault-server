@@ -3,7 +3,7 @@
 Newest first. Each release says what is new for you, what you need to do, and
 what differs between Linux, macOS and Windows.
 
-## 0.3.0 (not released yet): Linux packages
+## 0.3.0 (not released yet): Linux packages and moving from the old Docker server
 
 ### What's new
 
@@ -21,6 +21,12 @@ what differs between Linux, macOS and Windows.
   container. A tag such as `v0.3.0` drafts a release with the files and a
   `SHA256SUMS.txt`.
 
+- **`vault-server import`**: takes over the old Docker server's data (vault
+  files, devices with their keys, the certificate authority and admin key), so
+  **devices keep working and the fingerprint stays the same**. The old
+  server's files are named by a hash, so you give each vault's mailbox id
+  (`vault cloud status` on a device shows it, in Secret Vault versions after 0.2.0). See [Moving from the old Docker server](user-guide.md#moving-from-the-old-docker-server-in-the-vault-repo).
+
 ### What you need to do
 
 Nothing for an existing server. To move a hand-installed server to the
@@ -36,7 +42,7 @@ The packages are for Linux on x86-64. macOS and Windows are unchanged (see
 
 ### Known limits
 
-- Importing the old Docker server's data (`vault-server import`) is still to come.
+- `vault-server import` has been tried on files built to the old server's documented layout (and carries its authority over), not on a volume written by a real workerd: stop the old server before importing and keep your copy until the new one works.
 - Google Drive, OneDrive and Dropbox backup targets are not available yet.
 
 ## 0.2.0 (not released yet): sealed backups
@@ -80,7 +86,7 @@ folder into the container to use a folder target.
   this program registered with each of them. A folder those apps sync works
   now.
 - The recovery code is the seed in base32 groups, not 24 words.
-- Packages came in 0.3.0; importing the old Docker volume is still to come.
+- Packages and the Docker import came in 0.3.0.
 
 ## 0.1.0 (not released yet): the server itself
 

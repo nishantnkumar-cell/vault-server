@@ -21,9 +21,10 @@ Android use the same protocol and will work with it when those apps resume.)
   like the Cloudflare Worker and the Docker server in the vault repo, so the
   apps need nothing new.
 
-Sealed backups to a folder, and `.deb`, Arch and `.tar.gz` packages are here.
-Coming next: backups straight to Google Drive, OneDrive and Dropbox, and
-moving an existing Docker sync server over without joining devices again.
+Sealed backups to a folder, `.deb`, Arch and `.tar.gz` packages, and moving an
+existing Docker sync server over without joining devices again (`vault-server
+import`) are here. Coming next: backups straight to Google Drive, OneDrive and
+Dropbox.
 
 ## Start here
 
