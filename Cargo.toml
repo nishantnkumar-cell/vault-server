@@ -1,6 +1,6 @@
 [package]
 name = "vault-server"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Sync and backup server for Secret Vault: speaks the vault sync API 1, post-quantum TLS, own certificate authority."
 license = "PolyForm-Noncommercial-1.0.0"
