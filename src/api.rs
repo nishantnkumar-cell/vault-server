@@ -26,6 +26,8 @@ pub const REVISION: u32 = 2;
 pub const MAX_FILE: usize = 4 * 1024 * 1024;
 /// Saves per mailbox per minute before 429.
 pub const MAX_WRITES_PER_MINUTE: usize = 60;
+/// For the whole of a saved file to arrive.
+const BODY_TIME: Duration = Duration::from_secs(120);
 /// Open watch sockets per mailbox.
 pub const MAX_WATCHERS: usize = 32;
 
@@ -408,9 +410,11 @@ async fn handle(
             if declared > MAX_FILE {
                 return text(StatusCode::PAYLOAD_TOO_LARGE, &too_big);
             }
-            let data = match to_bytes(body, MAX_FILE).await {
-                Ok(b) => b,
-                Err(_) => return text(StatusCode::PAYLOAD_TOO_LARGE, &too_big),
+            // A save that dribbles in is given up, not waited for.
+            let data = match tokio::time::timeout(BODY_TIME, to_bytes(body, MAX_FILE)).await {
+                Ok(Ok(b)) => b,
+                Ok(Err(_)) => return text(StatusCode::PAYLOAD_TOO_LARGE, &too_big),
+                Err(_) => return text(StatusCode::REQUEST_TIMEOUT, "the save took too long"),
             };
             if data.is_empty() {
                 return text(StatusCode::BAD_REQUEST, "empty file");

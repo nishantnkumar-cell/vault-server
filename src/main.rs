@@ -153,6 +153,7 @@ fn config(c: &Common, http_loopback: Option<SocketAddr>) -> Result<Config> {
         public_port: c.public_port,
         admin_key: std::env::var("ADMIN_KEY").ok(),
         http_loopback,
+        limits: Default::default(),
     };
     server::remember_hosts(&mut cfg)?;
     Ok(cfg)

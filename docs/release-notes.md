@@ -3,6 +3,22 @@
 Newest first. Each release says what is new for you, what you need to do, and
 what differs between Linux, macOS and Windows.
 
+## Unreleased
+
+### Connections are limited
+
+- **One computer on the network can no longer tie up the server** by opening many
+  connections and saying nothing. At most 64 connections from one address and 512
+  in all are served at once; a connection that sends no request within 20 seconds,
+  or is quiet for 2 minutes, is closed; and a save must arrive within 2 minutes.
+  Live updates are not affected. Before this, such connections stayed open and
+  the server could stop answering. **Upgrade if your server is reachable by
+  people you do not trust**, for example from the internet.
+- Nothing to set up. If many devices reach the server through one proxy, they
+  share the limit of 64 connections.
+- `vault-server import` no longer leaves its temporary copy of an old database
+  behind when it fails.
+
 ## 0.3.0 (2026-11-24): Linux packages and moving from the old Docker server
 
 ### What's new
