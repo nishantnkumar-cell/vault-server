@@ -19,6 +19,12 @@ what differs between Linux, macOS and Windows.
 - `vault-server import` no longer leaves its temporary copy of an old database
   behind when it fails.
 
+### Signature library updated
+
+- The post-quantum signature library the server is built with now has the
+  upstream fixes for GHSA-5x2r-hc65-25f9 and GHSA-h37v-hp6w-2pp8. The server's
+  own code does not check such signatures, so its behaviour does not change.
+
 ## 0.3.0 (2026-11-24): Linux packages and moving from the old Docker server
 
 ### What's new
