@@ -1310,7 +1310,7 @@ dependencies = [
 [[package]]
 name = "ml-dsa"
 version = "0.0.4"
-source = "git+https://github.com/nishantnkumar-cell/PasswordVault?rev=bfa0cb7263a0d5785ac27f84f40ca444a61944ef#bfa0cb7263a0d5785ac27f84f40ca444a61944ef"
+source = "git+https://github.com/nishantnkumar-cell/PasswordVault?rev=0b9eb62d2c1475e46975d1c769a6f40be522fef8#0b9eb62d2c1475e46975d1c769a6f40be522fef8"
 dependencies = [
  "hybrid-array 0.3.1",
  "num-traits",
