@@ -3,7 +3,7 @@
 Newest first. Each release says what is new for you, what you need to do, and
 what differs between Linux, macOS and Windows.
 
-## 0.3.1 (not yet released): connection limits
+## 0.3.1 (2026-11-25): connection limits
 
 ### Connections are limited
 
