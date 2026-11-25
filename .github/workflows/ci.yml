@@ -153,7 +153,7 @@ jobs:
           # Removing the program keeps the data.
           sudo test -f /var/lib/vault-server/tls/ca.pem
       - run: contrib/package/tarball.sh
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-packages
           path: |
@@ -187,7 +187,7 @@ jobs:
           test "$(stat -c '%a %U' /etc/vault-server/env)" = "600 root"
           pacman -R --noconfirm vault-server
           test ! -e /usr/bin/vault-server
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: arch-package
           path: target/packages/*.pkg.tar.zst
