@@ -421,6 +421,8 @@ months; older ones are deleted from the target.
 Google Drive, OneDrive and Dropbox cannot be added directly yet. Until
 then, point a folder target at the folder your Google Drive, OneDrive or
 Dropbox app syncs; the files in it are sealed, so the provider sees nothing.
+Adding them directly is planned; [preparing for it](cloud-backup-setup.md)
+explains the app registration each service needs.
 
 ### Restoring after losing the server
 
