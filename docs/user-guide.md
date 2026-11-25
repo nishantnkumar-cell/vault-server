@@ -108,9 +108,9 @@ file for your system from the
 
 | System | Install |
 |---|---|
-| Debian 13, Ubuntu 24.04 or newer | `sudo apt install ./vault-server_0.3.0_amd64.deb` |
-| Arch Linux | `sudo pacman -U vault-server-0.3.0-x86_64.pkg.tar.zst` |
-| Any other Linux with systemd (x86-64) | `sudo tar -xzf vault-server-0.3.0-linux-x86_64.tar.gz -C /` then `sudo systemd-sysusers && sudo systemctl daemon-reload` |
+| Debian 13, Ubuntu 24.04 or newer | `sudo apt install ./vault-server_0.3.1_amd64.deb` |
+| Arch Linux | `sudo pacman -U vault-server-0.3.1-x86_64.pkg.tar.zst` |
+| Any other Linux with systemd (x86-64) | `sudo tar -xzf vault-server-0.3.1-linux-x86_64.tar.gz -C /` then `sudo systemd-sysusers && sudo systemctl daemon-reload` |
 
 (Use the version number of the file you downloaded.) The server is **not
 started yet**: it needs the address from step 3 first.
