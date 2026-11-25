@@ -3,15 +3,19 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper::service::{Service, service_fn};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto;
 use hyper_util::service::TowerToHyperService;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
 use crate::api::{self, Shared};
+use crate::limits::{Activity, Gate, Limits};
 use crate::store::Store;
 use crate::{files, tls, util};
 
@@ -30,6 +34,8 @@ pub struct Config {
     pub admin_key: Option<String>,
     /// Plain HTTP on this computer only, for tests and development.
     pub http_loopback: Option<SocketAddr>,
+    /// How many connections, and how long they may be quiet.
+    pub limits: Limits,
 }
 
 /// What [`prepare`] found or made.
@@ -161,6 +167,50 @@ impl Running {
     }
 }
 
+/// Answers one connection until it ends or has been quiet too long. A
+/// connection that becomes a WebSocket finishes here and carries on by itself.
+async fn serve<I>(stream: I, app: axum::Router, limits: Limits)
+where
+    I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let activity = Activity::default();
+    let seen = activity.clone();
+    let inner = TowerToHyperService::new(app);
+    let svc = service_fn(move |req| {
+        let busy = seen.request();
+        let answer = inner.call(req);
+        async move {
+            let r = answer.await;
+            drop(busy);
+            r
+        }
+    });
+    let mut builder = auto::Builder::new(TokioExecutor::new());
+    builder
+        .http1()
+        .timer(TokioTimer::new())
+        .header_read_timeout(limits.first_request);
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .max_concurrent_streams(32)
+        .keep_alive_interval(Some(Duration::from_secs(30)))
+        .keep_alive_timeout(Duration::from_secs(10));
+    let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), svc);
+    tokio::pin!(connection);
+    let tick = (limits.first_request.min(limits.idle) / 4).max(Duration::from_millis(50));
+    loop {
+        tokio::select! {
+            _ = connection.as_mut() => return,
+            _ = tokio::time::sleep(tick) => {
+                if activity.expired(&limits) {
+                    return; // dropping the connection closes it
+                }
+            }
+        }
+    }
+}
+
 /// Prepares and starts listening. Returns once the sockets are bound.
 pub async fn start(cfg: &Config) -> Result<Running> {
     let p = prepare(cfg)?;
@@ -176,31 +226,38 @@ pub async fn start(cfg: &Config) -> Result<Running> {
     let mut tasks = Vec::new();
 
     let tls_app = app.clone();
+    let limits = cfg.limits;
+    let gate = Gate::new(limits);
     tasks.push(tokio::spawn(async move {
         loop {
-            let Ok((tcp, peer)) = https.accept().await else {
+            let (tcp, peer) = match https.accept().await {
+                Ok(c) => c,
+                Err(e) => {
+                    // Out of file handles, for example: wait, do not spin.
+                    tracing::warn!("cannot accept a connection: {e}");
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
+            };
+            // No room: close it at once, so that the others stay responsive.
+            let Some(place) = gate.enter(peer.ip()) else {
+                tracing::debug!("too many connections; refusing one from {peer}");
                 continue;
             };
             let acceptor = acceptor.clone();
             let app = tls_app.clone();
             tokio::spawn(async move {
-                let stream = match tokio::time::timeout(
-                    std::time::Duration::from_secs(20),
-                    acceptor.accept(tcp),
-                )
-                .await
-                {
-                    Ok(Ok(s)) => s,
-                    Ok(Err(e)) => {
-                        tracing::debug!("TLS handshake with {peer} failed: {e}");
-                        return;
-                    }
-                    Err(_) => return,
-                };
-                let svc = TowerToHyperService::new(app);
-                let _ = auto::Builder::new(TokioExecutor::new())
-                    .serve_connection_with_upgrades(TokioIo::new(stream), svc)
-                    .await;
+                let _place = place;
+                let stream =
+                    match tokio::time::timeout(limits.handshake, acceptor.accept(tcp)).await {
+                        Ok(Ok(s)) => s,
+                        Ok(Err(e)) => {
+                            tracing::debug!("TLS handshake with {peer} failed: {e}");
+                            return;
+                        }
+                        Err(_) => return,
+                    };
+                serve(stream, app, limits).await;
             });
         }
     }));

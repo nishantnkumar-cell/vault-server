@@ -74,6 +74,8 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
 
 fn read_mailbox(path: &Path) -> Result<Option<OldMailbox>> {
     let tmp = tempfile_dir()?;
+    // Removed however this ends, errors included.
+    let _gone = RemoveOnDrop(tmp.clone());
     let name = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -148,8 +150,16 @@ fn read_mailbox(path: &Path) -> Result<Option<OldMailbox>> {
         None
     };
     drop(db);
-    let _ = std::fs::remove_dir_all(&tmp);
     Ok(result)
+}
+
+/// A temporary folder that does not outlive its use.
+struct RemoveOnDrop(PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn tempfile_dir() -> Result<PathBuf> {

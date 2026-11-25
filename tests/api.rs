@@ -5,14 +5,17 @@
 //! every call the same way.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use reqwest::{Client, Method, StatusCode};
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::pem::PemObject;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::{Message, protocol::frame::coding::CloseCode};
 use vault_server::api::{MAX_FILE, MAX_WRITES_PER_MINUTE};
+use vault_server::limits::Limits;
 use vault_server::server::{self, Config, Running};
 use vault_server::store::MAX_TICKETS;
 use vault_server::util::{random_hex, random_token};
@@ -52,6 +55,10 @@ fn tls_client(
 }
 
 async fn start() -> T {
+    start_with(Limits::default()).await
+}
+
+async fn start_with(limits: Limits) -> T {
     let dir = tempfile::tempdir().unwrap();
     let cfg = Config {
         data: dir.path().join("data"),
@@ -60,6 +67,7 @@ async fn start() -> T {
         public_port: None,
         admin_key: Some(ADMIN_KEY.into()),
         http_loopback: None,
+        limits,
     };
     let run = server::start(&cfg).await.unwrap();
     let ca = CertificateDer::from_pem_file(cfg.data.join("tls/ca.pem")).unwrap();
@@ -732,4 +740,94 @@ async fn needs_a_websocket_upgrade_and_a_valid_token() {
         )
         .await;
     assert_eq!(r.status(), 401);
+}
+
+// ---- strangers cannot use up the server ----
+
+type Tls = tokio_rustls::client::TlsStream<tokio::net::TcpStream>;
+
+/// A TLS connection that has not asked for anything yet.
+async fn silent(t: &T) -> std::io::Result<Tls> {
+    let cfg = tls_client(&t.ca, vault_server::tls::provider());
+    let tcp = tokio::net::TcpStream::connect(("127.0.0.1", t.run.https.port())).await?;
+    tokio_rustls::TlsConnector::from(Arc::new(cfg))
+        .connect("localhost".try_into().unwrap(), tcp)
+        .await
+}
+
+/// True if the server closes the connection within `wait`.
+async fn closed_within(c: &mut Tls, wait: Duration) -> bool {
+    let mut buf = [0u8; 4096];
+    tokio::time::timeout(wait, async {
+        // Anything the server says (HTTP/1 sends nothing unasked) then the end.
+        while matches!(c.read(&mut buf).await, Ok(n) if n > 0) {}
+    })
+    .await
+    .is_ok()
+}
+
+fn tight() -> Limits {
+    Limits {
+        total: 8,
+        per_address: 6,
+        handshake: Duration::from_secs(2),
+        first_request: Duration::from_millis(700),
+        idle: Duration::from_millis(1500),
+    }
+}
+
+#[tokio::test]
+async fn silent_and_half_sent_connections_are_closed() {
+    let t = start_with(tight()).await;
+    let mut nothing = silent(&t).await.unwrap();
+    let mut half = silent(&t).await.unwrap();
+    half.write_all(b"GET /v1 HTTP/1.1\r\nHost: x\r\n")
+        .await
+        .unwrap();
+    assert!(closed_within(&mut nothing, Duration::from_secs(5)).await);
+    assert!(closed_within(&mut half, Duration::from_secs(5)).await);
+    // A connection that asked once and then went quiet is closed too.
+    let mut once = silent(&t).await.unwrap();
+    once.write_all(b"GET /v1 HTTP/1.1\r\nHost: x\r\n\r\n")
+        .await
+        .unwrap();
+    assert!(closed_within(&mut once, Duration::from_secs(6)).await);
+}
+
+#[tokio::test]
+async fn one_address_cannot_take_every_place_and_places_come_back() {
+    let t = start_with(Limits {
+        first_request: Duration::from_secs(3),
+        ..tight()
+    })
+    .await;
+    let mut held = Vec::new();
+    for _ in 0..tight().per_address {
+        held.push(silent(&t).await.unwrap());
+    }
+    // The next is turned away at once (closed before or just after the handshake).
+    match silent(&t).await {
+        Err(_) => {}
+        Ok(mut c) => assert!(closed_within(&mut c, Duration::from_secs(1)).await),
+    }
+    // Once the quiet ones are timed out, a real request gets through again.
+    for c in &mut held {
+        assert!(closed_within(c, Duration::from_secs(10)).await);
+    }
+    let r = t.client.get(format!("{}/v1", t.base)).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+}
+
+#[tokio::test]
+async fn live_updates_outlast_the_idle_limit() {
+    let t = start_with(tight()).await;
+    let (id, token, _) = t.create(None).await;
+    let mut ws = t.watch(&id, &token).await;
+    assert!(ws.next().await.is_some(), "the first notice");
+    tokio::time::sleep(tight().idle * 3).await;
+    ws.send(Message::text("ping")).await.unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(5), ws.next())
+        .await
+        .expect("the socket is still served");
+    assert_eq!(reply.unwrap().unwrap(), Message::text("pong"));
 }
