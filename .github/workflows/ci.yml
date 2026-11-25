@@ -13,13 +13,26 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  deny:
+    # Advisories, licences, banned libraries and sources (deny.toml).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          command: check
+
   linux:
     name: Linux build and tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - run: rustup component add rustfmt clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
@@ -33,15 +46,19 @@ jobs:
     name: macOS build and tests
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --locked
 
   docker:
     name: Docker image
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - run: docker build -t vault-server:ci .
       - name: serves TLS with its own authority and keeps it across a restart
         run: |
@@ -66,12 +83,15 @@ jobs:
     name: Works with the vault's own sync client
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
           repository: nishantnkumar-cell/PasswordVault
           path: vault
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             .
@@ -98,8 +118,10 @@ jobs:
     name: Debian package
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo build --release --locked
       - run: contrib/deb/build.sh
       - name: Install, start, check, remove
@@ -131,7 +153,7 @@ jobs:
           # Removing the program keeps the data.
           sudo test -f /var/lib/vault-server/tls/ca.pem
       - run: contrib/package/tarball.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-packages
           path: |
@@ -145,7 +167,9 @@ jobs:
     container: archlinux:base-devel
     steps:
       - run: pacman -Syu --noconfirm --needed git rust systemd
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       # makepkg refuses to run as root.
       - name: Build the package
         run: |
@@ -163,7 +187,7 @@ jobs:
           test "$(stat -c '%a %U' /etc/vault-server/env)" = "600 root"
           pacman -R --noconfirm vault-server
           test ! -e /usr/bin/vault-server
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: arch-package
           path: target/packages/*.pkg.tar.zst
@@ -173,19 +197,21 @@ jobs:
   release:
     name: Draft release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, macos, docker, vault-client, deb, arch]
+    needs: [deny, linux, macos, docker, vault-client, deb, arch]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Tag matches Cargo.toml
         env:
           TAG: ${{ github.ref_name }}
         run: |
           want=$(contrib/package/version.sh)
           test "${TAG#v}" = "$want" || { echo "::error::tag $TAG does not match version $want in Cargo.toml"; exit 1; }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
       - name: Create the draft release
